@@ -8,6 +8,7 @@
 #endif
 #else
 #include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -144,6 +145,35 @@ std::optional<std::string> getHeader(const HttpRequest &req, const std::string &
         }
     }
     return std::nullopt;
+}
+
+bool sendAll(SocketHandle socket, const std::string &data) {
+    size_t totalSent = 0;
+    while (totalSent < data.size()) {
+#ifdef _WIN32
+        int sent = ::send(socket, data.data() + totalSent, static_cast<int>(data.size() - totalSent), 0);
+        if (sent == SOCKET_ERROR) {
+            int error = WSAGetLastError();
+            if (error == WSAEINTR) {
+                continue;
+            }
+            return false;
+        }
+#else
+        ssize_t sent = ::send(socket, data.data() + totalSent, data.size() - totalSent, 0);
+        if (sent < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+#endif
+        if (sent == 0) {
+            return false;
+        }
+        totalSent += static_cast<size_t>(sent);
+    }
+    return true;
 }
 
 bool parseRequestLine(const std::string &line, HttpRequest &request) {
@@ -916,7 +946,7 @@ void handleClient(SocketHandle clientFd,
     }
 
     auto text = buildResponse(response);
-    send(clientFd, text.c_str(), static_cast<int>(text.size()), 0);
+    (void)sendAll(clientFd, text);
     closeSocket(clientFd);
 }
 
@@ -925,35 +955,69 @@ void handleClient(SocketHandle clientFd,
 void runWebServer(Restaurant &restaurant, const std::string &staticDir, int port) {
     [[maybe_unused]] SocketEnvironment socketEnv;
 
-    SocketHandle serverFd = socket(AF_INET, SOCK_STREAM, 0);
-    if (serverFd == INVALID_SOCKET_HANDLE) {
-        throw std::runtime_error("Failed to create socket");
-    }
+    SocketHandle serverFd = INVALID_SOCKET_HANDLE;
+    bool usingIpv6 = false;
 
-#ifdef _WIN32
-    char opt = 1;
-    setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-#else
-    int opt = 1;
-    setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#ifndef _WIN32
+    std::signal(SIGPIPE, SIG_IGN);
 #endif
 
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(static_cast<uint16_t>(port));
+    auto configureReuseAddr = [](SocketHandle fd) {
+#ifdef _WIN32
+        char opt = 1;
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#else
+        int opt = 1;
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#endif
+    };
 
-    if (bind(serverFd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) < 0) {
-        closeSocket(serverFd);
-        throw std::runtime_error("Failed to bind socket");
+    SocketHandle ipv6Fd = socket(AF_INET6, SOCK_STREAM, 0);
+    if (ipv6Fd != INVALID_SOCKET_HANDLE) {
+        configureReuseAddr(ipv6Fd);
+#ifdef IPV6_V6ONLY
+#ifdef _WIN32
+        char disable = 0;
+        setsockopt(ipv6Fd, IPPROTO_IPV6, IPV6_V6ONLY, &disable, sizeof(disable));
+#else
+        int disable = 0;
+        setsockopt(ipv6Fd, IPPROTO_IPV6, IPV6_V6ONLY, &disable, sizeof(disable));
+#endif
+#endif
+        sockaddr_in6 address6{};
+        address6.sin6_family = AF_INET6;
+        address6.sin6_addr = in6addr_any;
+        address6.sin6_port = htons(static_cast<uint16_t>(port));
+        if (bind(ipv6Fd, reinterpret_cast<sockaddr *>(&address6), sizeof(address6)) == 0 &&
+            listen(ipv6Fd, 10) == 0) {
+            serverFd = ipv6Fd;
+            usingIpv6 = true;
+        } else {
+            closeSocket(ipv6Fd);
+        }
     }
 
-    if (listen(serverFd, 10) < 0) {
-        closeSocket(serverFd);
-        throw std::runtime_error("Failed to listen on socket");
+    if (serverFd == INVALID_SOCKET_HANDLE) {
+        serverFd = socket(AF_INET, SOCK_STREAM, 0);
+        if (serverFd == INVALID_SOCKET_HANDLE) {
+            throw std::runtime_error("Failed to create socket");
+        }
+        configureReuseAddr(serverFd);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = INADDR_ANY;
+        address.sin_port = htons(static_cast<uint16_t>(port));
+        if (bind(serverFd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) < 0 || listen(serverFd, 10) < 0) {
+            closeSocket(serverFd);
+            throw std::runtime_error("Failed to bind socket");
+        }
     }
 
-    std::cout << "Web server running on http://localhost:" << port << "\n";
+    if (usingIpv6) {
+        std::cout << "Web server running on http://localhost:" << port << " (dual-stack IPv6/IPv4)\n";
+    } else {
+        std::cout << "Web server running on http://localhost:" << port << "\n";
+    }
 
     std::mutex mutex;
     while (true) {

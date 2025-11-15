@@ -17,7 +17,7 @@ const staffList = document.getElementById("staffList");
 let reservationsCache = [];
 let menuCache = [];
 
-const FALLBACK_API_BASE = "http://localhost:8080";
+const FALLBACK_API_BASE = "http://127.0.0.1:8080";
 const API_BASE =
   typeof window !== "undefined" && window.__BOOKING_API_BASE__
     ? window.__BOOKING_API_BASE__
@@ -39,7 +39,8 @@ function normalizeError(error) {
         ? window.location.origin
         : FALLBACK_API_BASE;
     const target = API_BASE || currentOrigin;
-    return `无法连接服务器，请确认已启动后端服务（${target}）。`;
+    const alt = target === FALLBACK_API_BASE ? " 或 http://localhost:8080" : "";
+    return `无法连接服务器，请确认已启动后端服务（${target}${alt}）。`;
   }
   return error.message || "发生未知错误";
 }
