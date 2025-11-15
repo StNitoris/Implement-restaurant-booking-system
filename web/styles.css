@@ -17,6 +17,16 @@ footer {
   text-align: center;
 }
 
+.offline-banner {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(16, 185, 129, 0.25);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  border-radius: 8px;
+  color: #ecfdf5;
+  font-size: 0.95rem;
+}
+
 main {
   max-width: 1100px;
   margin: 0 auto;
