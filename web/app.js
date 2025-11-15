@@ -17,8 +17,35 @@ const staffList = document.getElementById("staffList");
 let reservationsCache = [];
 let menuCache = [];
 
+const FALLBACK_API_BASE = "http://localhost:8080";
+const API_BASE =
+  typeof window !== "undefined" && window.__BOOKING_API_BASE__
+    ? window.__BOOKING_API_BASE__
+    : window.location.protocol === "file:" || window.location.origin === "null"
+    ? FALLBACK_API_BASE
+    : "";
+
+function resolveApi(path) {
+  if (/^https?:\/\//.test(path)) {
+    return path;
+  }
+  return `${API_BASE}${path}`;
+}
+
+function normalizeError(error) {
+  if (error instanceof TypeError || error.name === "TypeError") {
+    const currentOrigin =
+      window.location.origin && window.location.origin !== "null"
+        ? window.location.origin
+        : FALLBACK_API_BASE;
+    const target = API_BASE || currentOrigin;
+    return `无法连接服务器，请确认已启动后端服务（${target}）。`;
+  }
+  return error.message || "发生未知错误";
+}
+
 async function fetchJson(url) {
-  const response = await fetch(url);
+  const response = await fetch(resolveApi(url));
   if (!response.ok) {
     throw new Error(`请求失败: ${response.status}`);
   }
@@ -206,7 +233,7 @@ async function updateReservationStatus(id, status) {
   try {
     const params = new URLSearchParams();
     params.set("status", status);
-    const response = await fetch(`/api/reservations/${id}/status`, {
+    const response = await fetch(resolveApi(`/api/reservations/${id}/status`), {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -218,7 +245,7 @@ async function updateReservationStatus(id, status) {
     }
     await loadReservations();
   } catch (error) {
-    alert(error.message);
+    alert(normalizeError(error));
   }
 }
 
@@ -227,7 +254,7 @@ async function deleteReservation(id) {
     return;
   }
   try {
-    const response = await fetch(`/api/reservations/${id}`, {
+    const response = await fetch(resolveApi(`/api/reservations/${id}`), {
       method: "DELETE",
     });
     if (!response.ok) {
@@ -239,7 +266,7 @@ async function deleteReservation(id) {
     await loadReport();
     await loadOrders();
   } catch (error) {
-    alert(error.message);
+    alert(normalizeError(error));
   }
 }
 
@@ -248,7 +275,7 @@ async function loadTables() {
     const data = await fetchJson("/api/tables");
     renderTables(data);
   } catch (error) {
-    tablesContainer.innerHTML = `<p class="error">${error.message}</p>`;
+    tablesContainer.innerHTML = `<p class="error">${normalizeError(error)}</p>`;
   }
 }
 
@@ -259,7 +286,7 @@ async function loadReservations() {
     renderReservations(data);
     populateReservationOptions();
   } catch (error) {
-    reservationTableBody.innerHTML = `<tr><td colspan="7">${error.message}</td></tr>`;
+    reservationTableBody.innerHTML = `<tr><td colspan="7">${normalizeError(error)}</td></tr>`;
   }
 }
 
@@ -268,7 +295,7 @@ async function loadOrders() {
     const data = await fetchJson("/api/orders");
     renderOrders(data);
   } catch (error) {
-    ordersTableBody.innerHTML = `<tr><td colspan="4">${error.message}</td></tr>`;
+    ordersTableBody.innerHTML = `<tr><td colspan="4">${normalizeError(error)}</td></tr>`;
   }
 }
 
@@ -284,7 +311,7 @@ async function loadMenu() {
     });
     refreshOrderItemSelects();
   } catch (error) {
-    menuList.innerHTML = `<li>${error.message}</li>`;
+    menuList.innerHTML = `<li>${normalizeError(error)}</li>`;
   }
 }
 
@@ -298,7 +325,7 @@ async function loadReport() {
       <p>营业额：￥${data.revenue.toFixed(2)}</p>
     `;
   } catch (error) {
-    reportContainer.textContent = error.message;
+    reportContainer.textContent = normalizeError(error);
   }
 }
 
@@ -307,7 +334,7 @@ async function loadStaff() {
     const data = await fetchJson("/api/staff");
     renderStaff(data);
   } catch (error) {
-    staffList.innerHTML = `<li>${error.message}</li>`;
+    staffList.innerHTML = `<li>${normalizeError(error)}</li>`;
   }
 }
 
@@ -319,7 +346,7 @@ async function submitForm(form, url, feedbackEl, successMessage) {
   }
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(resolveApi(url), {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -338,7 +365,7 @@ async function submitForm(form, url, feedbackEl, successMessage) {
     await loadReport();
     await loadOrders();
   } catch (error) {
-    feedbackEl.textContent = error.message;
+    feedbackEl.textContent = normalizeError(error);
     feedbackEl.style.color = "#ef4444";
   }
 }
@@ -382,7 +409,7 @@ orderForm.addEventListener("submit", async (event) => {
     return;
   }
   try {
-    const response = await fetch("/api/orders", {
+    const response = await fetch(resolveApi("/api/orders"), {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -402,7 +429,7 @@ orderForm.addEventListener("submit", async (event) => {
     await loadOrders();
     await loadReport();
   } catch (error) {
-    orderFeedback.textContent = error.message;
+    orderFeedback.textContent = normalizeError(error);
     orderFeedback.style.color = "#ef4444";
   }
 });
