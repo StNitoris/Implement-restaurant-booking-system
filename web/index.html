@@ -13,34 +13,53 @@
 
     <main>
       <section class="panel">
-        <h2>桌位概览</h2>
-        <button id="refreshTables">刷新桌位状态</button>
+        <div class="panel-header">
+          <div>
+            <h2>桌位概览</h2>
+            <p class="panel-subtitle">随时查看每张桌位的状态与分配情况</p>
+          </div>
+          <div class="actions">
+            <button id="refreshTables">刷新桌位状态</button>
+          </div>
+        </div>
         <div id="tables" class="grid"></div>
       </section>
 
-      <section class="panel">
-        <h2>预订列表</h2>
-        <div class="actions">
-          <button id="refreshReservations">刷新预订</button>
+      <section class="panel panel-wide">
+        <div class="panel-header">
+          <div>
+            <h2>预订列表</h2>
+            <p class="panel-subtitle">长表格区域支持滚动，可直接删除或重新分配桌位</p>
+          </div>
+          <div class="actions">
+            <button id="refreshReservations">刷新预订</button>
+          </div>
         </div>
-        <table id="reservationTable">
-          <thead>
-            <tr>
-              <th>编号</th>
-              <th>客人</th>
-              <th>人数</th>
-              <th>时间</th>
-              <th>桌号</th>
-              <th>状态</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+        <div class="table-wrapper">
+          <table id="reservationTable">
+            <thead>
+              <tr>
+                <th>编号</th>
+                <th>客人</th>
+                <th>人数</th>
+                <th>时间</th>
+                <th>桌号</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </section>
 
-      <section class="panel">
-        <h2>录入点餐</h2>
+      <section class="panel panel-wide">
+        <div class="panel-header">
+          <div>
+            <h2>录入点餐</h2>
+            <p class="panel-subtitle">为已预订客人快速录入菜品并查看订单明细</p>
+          </div>
+        </div>
         <form id="orderForm">
           <div class="field">
             <label>预订编号</label>
@@ -53,29 +72,39 @@
             <div id="orderItems" class="order-items"></div>
             <button type="button" id="addOrderItem">添加菜品</button>
           </div>
-          <button type="submit">提交订单</button>
+          <button type="submit" class="order-submit">提交订单</button>
           <p class="feedback" id="orderFeedback"></p>
         </form>
         <div class="orders-view">
-          <div class="actions">
-            <button id="refreshOrders">刷新订单</button>
+          <div class="panel-subheader">
+            <h3>当前订单</h3>
+            <div class="actions">
+              <button id="refreshOrders">刷新订单</button>
+            </div>
           </div>
-          <table id="ordersTable">
-            <thead>
-              <tr>
-                <th>订单号</th>
-                <th>预订编号</th>
-                <th>菜品明细</th>
-                <th>金额</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+          <div class="table-wrapper">
+            <table id="ordersTable">
+              <thead>
+                <tr>
+                  <th>订单号</th>
+                  <th>预订编号</th>
+                  <th>菜品明细</th>
+                  <th>金额</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
       <section class="panel">
-        <h2>创建预订</h2>
+        <div class="panel-header">
+          <div>
+            <h2>创建预订</h2>
+            <p class="panel-subtitle">填写基础信息即可生成 R 前缀的预订编号</p>
+          </div>
+        </div>
         <form id="reservationForm">
           <div class="field">
             <label>顾客姓名</label>
@@ -111,7 +140,12 @@
       </section>
 
       <section class="panel">
-        <h2>散客快速登记</h2>
+        <div class="panel-header">
+          <div>
+            <h2>散客快速登记</h2>
+            <p class="panel-subtitle">记录 W 前缀散客并保持联系方式</p>
+          </div>
+        </div>
         <form id="walkInForm">
           <div class="field">
             <label>顾客姓名</label>
@@ -135,7 +169,15 @@
       </section>
 
       <section class="panel">
-        <h2>菜单与今日经营</h2>
+        <div class="panel-header">
+          <div>
+            <h2>菜单与今日经营</h2>
+            <p class="panel-subtitle">结合菜单与实时报表，掌握营业情况</p>
+          </div>
+          <div class="actions">
+            <button id="refreshReport">刷新报表</button>
+          </div>
+        </div>
         <div class="two-column">
           <div>
             <h3>菜单</h3>
@@ -143,22 +185,24 @@
           </div>
           <div>
             <h3>今日数据</h3>
-            <button id="refreshReport">刷新报表</button>
             <div id="report"></div>
           </div>
         </div>
       </section>
 
       <section class="panel">
-        <h2>员工信息</h2>
-        <button id="refreshStaff">刷新员工列表</button>
+        <div class="panel-header">
+          <div>
+            <h2>员工信息</h2>
+            <p class="panel-subtitle">查看前厅与后厨成员的当班角色</p>
+          </div>
+          <div class="actions">
+            <button id="refreshStaff">刷新员工列表</button>
+          </div>
+        </div>
         <ul id="staffList" class="staff-list"></ul>
       </section>
     </main>
-
-    <footer>
-      <small>前端示例仅用于课程作业演示，数据在服务器重启后会重置。</small>
-    </footer>
 
     <script src="app.js"></script>
   </body>

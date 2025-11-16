@@ -22,5 +22,10 @@ add_executable(restaurant_booking_server
     src/web_main.cpp
     src/WebServer.cpp
 )
-target_link_libraries(restaurant_booking_server PRIVATE booking_core pthread)
+
+if (WIN32)
+    target_link_libraries(restaurant_booking_server PRIVATE booking_core ws2_32)
+else()
+    target_link_libraries(restaurant_booking_server PRIVATE booking_core pthread)
+endif()
 
