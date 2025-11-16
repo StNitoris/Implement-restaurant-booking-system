@@ -241,14 +241,10 @@ public:
                                    std::chrono::minutes duration,
                                    const std::string &notes = {});
     Reservation &recordWalkIn(const Customer &customer, int partySize, const std::string &notes = {});
-    bool autoAssignTable(const std::string &id);
-    bool assignTable(const std::string &id, int tableId);
-    bool clearTableAssignment(const std::string &id);
     Order &recordOrder(const std::string &reservationId);
     Reservation *findReservationById(const std::string &id);
     const Reservation *findReservationById(const std::string &id) const;
     Order *findOrderById(const std::string &id);
-    bool deleteReservation(const std::string &id);
     bool updateReservationDetails(const std::string &id,
                                   const Customer &customer,
                                   int partySize,
@@ -269,20 +265,12 @@ private:
                           std::chrono::system_clock::time_point time,
                           std::chrono::minutes duration,
                           const std::optional<std::string> &ignoreReservationId = std::nullopt) const;
-    Reservation &createReservationRecord(std::string id,
-                                         const Customer &customer,
-                                         int partySize,
-                                         std::chrono::system_clock::time_point time,
-                                         std::chrono::minutes duration,
-                                         const std::string &notes);
-    std::string formatNumberedId(char prefix, int number) const;
 
     std::string date_;
     std::vector<Table> tables_;
     std::vector<Reservation> reservations_;
     std::vector<Order> orders_;
-    int nextReservationNumber_ = 1000;
-    int nextWalkInNumber_ = 5000;
+    int nextReservationNumber_ = 1;
     int nextOrderNumber_ = 1;
 };
 

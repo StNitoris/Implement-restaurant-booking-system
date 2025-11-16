@@ -1,21 +1,13 @@
 #include "WebServer.hpp"
 
-#ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#ifdef _MSC_VER
-#pragma comment(lib, "ws2_32.lib")
-#endif
-#else
 #include <arpa/inet.h>
-#include <netinet/in.h>
+#include <fcntl.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
-#endif
 
 #include <algorithm>
 #include <chrono>
-#include <cerrno>
 #include <cctype>
 #include <csignal>
 #include <cstdlib>
@@ -30,45 +22,10 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 namespace booking {
 namespace {
-
-#ifdef _WIN32
-using SocketHandle = SOCKET;
-constexpr SocketHandle INVALID_SOCKET_HANDLE = INVALID_SOCKET;
-
-void closeSocket(SocketHandle socket) { closesocket(socket); }
-
-class SocketEnvironment {
-public:
-    SocketEnvironment() {
-        WSADATA data;
-        if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
-            throw std::runtime_error("Failed to initialize Winsock");
-        }
-    }
-
-    SocketEnvironment(const SocketEnvironment &) = delete;
-    SocketEnvironment &operator=(const SocketEnvironment &) = delete;
-
-    ~SocketEnvironment() { WSACleanup(); }
-};
-#else
-using SocketHandle = int;
-constexpr SocketHandle INVALID_SOCKET_HANDLE = -1;
-
-void closeSocket(SocketHandle socket) { close(socket); }
-
-class SocketEnvironment {
-public:
-    SocketEnvironment() = default;
-    SocketEnvironment(const SocketEnvironment &) = delete;
-    SocketEnvironment &operator=(const SocketEnvironment &) = delete;
-};
-#endif
 
 struct HttpRequest {
     std::string method;
@@ -81,7 +38,6 @@ struct HttpResponse {
     int status = 200;
     std::string contentType = "application/json; charset=utf-8";
     std::string body;
-    std::vector<std::pair<std::string, std::string>> headers;
 };
 
 std::string statusMessage(int status) {
@@ -184,18 +140,18 @@ bool parseHeaders(std::istringstream &stream, HttpRequest &request) {
     return true;
 }
 
-bool readHttpRequest(SocketHandle clientFd, HttpRequest &request) {
+bool readHttpRequest(int clientFd, HttpRequest &request) {
     std::string buffer;
     buffer.reserve(4096);
     char temp[4096];
-    int received = 0;
+    ssize_t received = 0;
 
     while (buffer.find("\r\n\r\n") == std::string::npos) {
         received = recv(clientFd, temp, sizeof(temp), 0);
         if (received <= 0) {
             return false;
         }
-        buffer.append(temp, static_cast<size_t>(received));
+        buffer.append(temp, received);
         if (buffer.size() > 1'000'000) {
             return false;
         }
@@ -232,7 +188,7 @@ bool readHttpRequest(SocketHandle clientFd, HttpRequest &request) {
         if (received <= 0) {
             return false;
         }
-        bodyPart.append(temp, static_cast<size_t>(received));
+        bodyPart.append(temp, received);
         if (bodyPart.size() > 1'000'000) {
             return false;
         }
@@ -382,10 +338,7 @@ std::optional<ReservationStatus> parseReservationStatus(const std::string &value
 std::string tablesToJson(const Restaurant &restaurant) {
     std::ostringstream oss;
     oss << '[';
-    const auto &sheet = restaurant.getBookingSheet();
-    const auto &tables = sheet.getTables();
-    const auto &reservations = sheet.getReservations();
-    const auto &orders = sheet.getOrders();
+    const auto &tables = restaurant.getBookingSheet().getTables();
     for (size_t i = 0; i < tables.size(); ++i) {
         const auto &table = tables[i];
         if (i > 0) {
@@ -395,41 +348,7 @@ std::string tablesToJson(const Restaurant &restaurant) {
             << "\"id\":" << table.getId() << ','
             << "\"capacity\":" << table.getCapacity() << ','
             << "\"location\":\"" << escapeJson(table.getLocation()) << "\",";
-        oss << "\"status\":\"" << tableStatusToString(table.getStatus()) << "\",";
-        oss << "\"reservations\":[";
-        bool firstReservation = true;
-        for (const auto &reservation : reservations) {
-            if (!reservation.getTableId() || *reservation.getTableId() != table.getId()) {
-                continue;
-            }
-            if (reservation.getStatus() == ReservationStatus::Cancelled) {
-                continue;
-            }
-            if (!firstReservation) {
-                oss << ',';
-            }
-            firstReservation = false;
-            oss << '{'
-                << "\"id\":\"" << escapeJson(reservation.getId()) << "\",";
-            oss << "\"customer\":\"" << escapeJson(reservation.getCustomer().getName()) << "\",";
-            oss << "\"partySize\":" << reservation.getPartySize() << ',';
-            oss << "\"status\":\"" << reservationStatusToString(reservation.getStatus()) << "\",";
-            oss << "\"orders\":[";
-            bool firstOrder = true;
-            for (const auto &order : orders) {
-                if (order.getReservationId() != reservation.getId()) {
-                    continue;
-                }
-                if (!firstOrder) {
-                    oss << ',';
-                }
-                firstOrder = false;
-                oss << "\"" << escapeJson(order.getId()) << "\"";
-            }
-            oss << ']';
-            oss << '}';
-        }
-        oss << ']';
+        oss << "\"status\":\"" << tableStatusToString(table.getStatus()) << "\"";
         oss << '}';
     }
     oss << ']';
@@ -571,38 +490,11 @@ std::string reportToJson(const Report &report) {
     return oss.str();
 }
 
-bool hasHeader(const HttpResponse &response, const std::string &key) {
-    for (const auto &header : response.headers) {
-        if (headerEquals(header.first, key)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-void ensureHeader(HttpResponse &response, const std::string &key, const std::string &value) {
-    if (!hasHeader(response, key)) {
-        response.headers.emplace_back(key, value);
-    }
-}
-
-void applyCorsHeaders(HttpResponse &response, bool includeMethods) {
-    ensureHeader(response, "Access-Control-Allow-Origin", "*");
-    if (includeMethods) {
-        ensureHeader(response, "Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-        ensureHeader(response, "Access-Control-Allow-Headers", "Content-Type");
-        ensureHeader(response, "Access-Control-Max-Age", "86400");
-    }
-}
-
 std::string buildResponse(const HttpResponse &response) {
     std::ostringstream oss;
     oss << "HTTP/1.1 " << response.status << ' ' << statusMessage(response.status) << "\r\n";
     oss << "Content-Type: " << response.contentType << "\r\n";
     oss << "Content-Length: " << response.body.size() << "\r\n";
-    for (const auto &header : response.headers) {
-        oss << header.first << ": " << header.second << "\r\n";
-    }
     oss << "Connection: close\r\n\r\n";
     oss << response.body;
     return oss.str();
@@ -661,15 +553,6 @@ HttpResponse serveStaticFile(const std::string &root, const std::string &path) {
     response.status = 200;
     response.contentType = guessMimeType(fullPath);
     response.body = *content;
-    return response;
-}
-
-HttpResponse buildPreflightResponse() {
-    HttpResponse response;
-    response.status = 204;
-    response.contentType = "text/plain; charset=utf-8";
-    response.body.clear();
-    applyCorsHeaders(response, true);
     return response;
 }
 
@@ -918,7 +801,6 @@ HttpResponse handleApiRequest(const HttpRequest &request,
                 break;
             case ReservationStatus::Cancelled:
                 reservation->cancel();
-                reservation->clearTable();
                 break;
             case ReservationStatus::Open:
                 reservation->updateStatus(ReservationStatus::Open);
@@ -928,184 +810,62 @@ HttpResponse handleApiRequest(const HttpRequest &request,
         return response;
     }
 
-    const std::string tableSuffix = "/table";
-    if (request.method == "POST" && startsWith(request.path, statusPrefix) &&
-        request.path.size() > statusPrefix.size() + tableSuffix.size() && endsWith(request.path, tableSuffix)) {
-        auto id = request.path.substr(statusPrefix.size(), request.path.size() - statusPrefix.size() - tableSuffix.size());
-        auto reservation = sheet.findReservationById(id);
-        if (!reservation) {
-            return {404, "text/plain; charset=utf-8", "Reservation not found"};
-        }
-        auto data = parseFormEncoded(request.body);
-        auto mode = getFirstField(data, "mode").value_or("");
-        if (mode == "clear") {
-            if (!sheet.clearTableAssignment(id)) {
-                return {409, "text/plain; charset=utf-8", "Unable to clear table"};
-            }
-        } else if (mode == "auto") {
-            if (!sheet.autoAssignTable(id)) {
-                return {409, "text/plain; charset=utf-8", "No suitable table available"};
-            }
-        } else {
-            auto tableField = getFirstField(data, "tableId");
-            if (!tableField || tableField->empty()) {
-                return {400, "text/plain; charset=utf-8", "Missing tableId"};
-            }
-            auto parsed = toInt(*tableField);
-            if (!parsed || *parsed <= 0) {
-                return {400, "text/plain; charset=utf-8", "Invalid tableId"};
-            }
-            if (!sheet.assignTable(id, *parsed)) {
-                return {409, "text/plain; charset=utf-8", "Table not available"};
-            }
-        }
-        reservation = sheet.findReservationById(id);
-        if (!reservation) {
-            return {404, "text/plain; charset=utf-8", "Reservation not found"};
-        }
-        response.body = reservationToJson(*reservation);
-        return response;
-    }
-
     return {404, "text/plain; charset=utf-8", "Not Found"};
 }
 
-int portableSend(SocketHandle socket, const char *data, size_t length) {
-    size_t totalSent = 0;
-    while (totalSent < length) {
-#ifdef _WIN32
-        int chunk = send(socket, data + totalSent, static_cast<int>(length - totalSent), 0);
-#else
-        ssize_t chunk = send(socket, data + totalSent, length - totalSent, 0);
-#endif
-        if (chunk <= 0) {
-            return -1;
-        }
-        totalSent += static_cast<size_t>(chunk);
-    }
-    return static_cast<int>(totalSent);
-}
-
-void handleClient(SocketHandle clientFd,
-                  Restaurant &restaurant,
-                  std::mutex &mutex,
-                  const std::string &staticRoot) {
+void handleClient(int clientFd, Restaurant &restaurant, std::mutex &mutex, const std::string &staticRoot) {
     HttpRequest request;
     if (!readHttpRequest(clientFd, request)) {
-        closeSocket(clientFd);
+        close(clientFd);
         return;
     }
 
-    bool isApiRequest = startsWith(request.path, "/api/");
-
     HttpResponse response;
-    if (request.method == "OPTIONS" && isApiRequest) {
-        response = buildPreflightResponse();
-    } else if (isApiRequest) {
+    if (startsWith(request.path, "/api/")) {
         response = handleApiRequest(request, restaurant, mutex);
-        applyCorsHeaders(response, true);
     } else {
         response = serveStaticFile(staticRoot, request.path);
-        applyCorsHeaders(response, false);
     }
 
     auto text = buildResponse(response);
-    portableSend(clientFd, text.c_str(), text.size());
-    closeSocket(clientFd);
+    send(clientFd, text.c_str(), text.size(), 0);
+    close(clientFd);
 }
 
 }  // namespace
 
-SocketHandle createListeningSocket(int port) {
-    SocketHandle serverFd = INVALID_SOCKET_HANDLE;
-
-#ifdef AF_INET6
-    serverFd = socket(AF_INET6, SOCK_STREAM, 0);
-    if (serverFd != INVALID_SOCKET_HANDLE) {
-#ifdef _WIN32
-        char reuse = 1;
-        setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-        char dualStack = 0;
-        setsockopt(serverFd, IPPROTO_IPV6, IPV6_V6ONLY, &dualStack, sizeof(dualStack));
-#else
-        int reuse = 1;
-        setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-        int dualStack = 0;
-        setsockopt(serverFd, IPPROTO_IPV6, IPV6_V6ONLY, &dualStack, sizeof(dualStack));
-#endif
-
-        sockaddr_in6 address{};
-        address.sin6_family = AF_INET6;
-        address.sin6_addr = in6addr_any;
-        address.sin6_port = htons(static_cast<uint16_t>(port));
-
-        if (bind(serverFd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) == 0) {
-            if (listen(serverFd, 10) == 0) {
-                return serverFd;
-            }
-        }
-        closeSocket(serverFd);
-        serverFd = INVALID_SOCKET_HANDLE;
-    }
-#endif
-
-    serverFd = socket(AF_INET, SOCK_STREAM, 0);
-    if (serverFd == INVALID_SOCKET_HANDLE) {
+void runWebServer(Restaurant &restaurant, const std::string &staticDir, int port) {
+    int serverFd = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverFd == -1) {
         throw std::runtime_error("Failed to create socket");
     }
 
-#ifdef _WIN32
-    char opt = 1;
-    setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-#else
     int opt = 1;
     setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-#endif
 
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(static_cast<uint16_t>(port));
+    address.sin_port = htons(port);
 
     if (bind(serverFd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) < 0) {
-        closeSocket(serverFd);
+        close(serverFd);
         throw std::runtime_error("Failed to bind socket");
     }
 
     if (listen(serverFd, 10) < 0) {
-        closeSocket(serverFd);
+        close(serverFd);
         throw std::runtime_error("Failed to listen on socket");
     }
 
-    return serverFd;
-}
-
-void runWebServer(Restaurant &restaurant, const std::string &staticDir, int port) {
-    [[maybe_unused]] SocketEnvironment socketEnv;
-
-    SocketHandle serverFd = createListeningSocket(port);
-
     std::cout << "Web server running on http://localhost:" << port << "\n";
-#ifdef AF_INET6
-    std::cout << "Web server also available via http://[::1]:" << port << "\n";
-#endif
 
     std::mutex mutex;
     while (true) {
         sockaddr_in clientAddress{};
         socklen_t clientLen = sizeof(clientAddress);
-        SocketHandle clientFd = accept(serverFd, reinterpret_cast<sockaddr *>(&clientAddress), &clientLen);
-        if (clientFd == INVALID_SOCKET_HANDLE) {
-#ifdef _WIN32
-            int error = WSAGetLastError();
-            if (error == WSAEINTR) {
-                continue;
-            }
-#else
-            if (errno == EINTR) {
-                continue;
-            }
-#endif
+        int clientFd = accept(serverFd, reinterpret_cast<sockaddr *>(&clientAddress), &clientLen);
+        if (clientFd < 0) {
             continue;
         }
         std::thread worker(handleClient, clientFd, std::ref(restaurant), std::ref(mutex), staticDir);
