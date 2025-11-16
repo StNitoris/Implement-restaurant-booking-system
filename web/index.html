@@ -23,20 +23,22 @@
         <div class="actions">
           <button id="refreshReservations">刷新预订</button>
         </div>
-        <table id="reservationTable">
-          <thead>
-            <tr>
-              <th>编号</th>
-              <th>客人</th>
-              <th>人数</th>
-              <th>时间</th>
-              <th>桌号</th>
-              <th>状态</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+        <div class="table-wrapper">
+          <table id="reservationTable">
+            <thead>
+              <tr>
+                <th>编号</th>
+                <th>客人</th>
+                <th>人数</th>
+                <th>时间</th>
+                <th>桌号</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="panel">
@@ -60,17 +62,19 @@
           <div class="actions">
             <button id="refreshOrders">刷新订单</button>
           </div>
-          <table id="ordersTable">
-            <thead>
-              <tr>
-                <th>订单号</th>
-                <th>预订编号</th>
-                <th>菜品明细</th>
-                <th>金额</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+          <div class="table-wrapper">
+            <table id="ordersTable">
+              <thead>
+                <tr>
+                  <th>订单号</th>
+                  <th>预订编号</th>
+                  <th>菜品明细</th>
+                  <th>金额</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
