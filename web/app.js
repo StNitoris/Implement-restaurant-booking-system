@@ -685,16 +685,6 @@ let tablesCache = [];
 let reservationsCache = [];
 let menuCache = [];
 
-if (USE_MOCK_API) {
-  const header = document.querySelector("header");
-  if (header) {
-    const banner = document.createElement("p");
-    banner.className = "offline-banner";
-    banner.textContent = "当前使用本地演示模式，无需启动后端服务，数据会保存在浏览器中。";
-    header.appendChild(banner);
-  }
-}
-
 async function apiFetch(url, options = {}) {
   if (USE_MOCK_API && mockApi) {
     return mockApi.handle(url, options);
