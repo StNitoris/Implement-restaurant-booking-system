@@ -286,7 +286,39 @@ std::vector<int> BookingSheet::findAllAvailableTableIds(int partySize,
             ids.push_back(table.getId());
         }
     }
+    std::sort(ids.begin(), ids.end(), [&](int lhs, int rhs) {
+        const auto *lhsTable = getTableById(lhs);
+        const auto *rhsTable = getTableById(rhs);
+        if (!lhsTable || !rhsTable) {
+            return lhs < rhs;
+        }
+        if (lhsTable->getCapacity() == rhsTable->getCapacity()) {
+            return lhs < rhs;
+        }
+        return lhsTable->getCapacity() < rhsTable->getCapacity();
+    });
     return ids;
+}
+
+Reservation &BookingSheet::createReservationRecord(std::string id,
+                                                  const Customer &customer,
+                                                  int partySize,
+                                                  std::chrono::system_clock::time_point time,
+                                                  std::chrono::minutes duration,
+                                                  const std::string &notes) {
+    reservations_.emplace_back(std::move(id), customer, partySize, time, duration, notes);
+    Reservation &reservation = reservations_.back();
+    auto tableId = findAvailableTableId(partySize, time, duration, reservation.getId());
+    if (tableId) {
+        reservation.assignTable(*tableId);
+    }
+    return reservation;
+}
+
+std::string BookingSheet::formatNumberedId(char prefix, int number) const {
+    std::ostringstream oss;
+    oss << prefix << std::setw(4) << std::setfill('0') << number;
+    return oss.str();
 }
 
 Reservation &BookingSheet::createReservation(const Customer &customer,
@@ -294,22 +326,61 @@ Reservation &BookingSheet::createReservation(const Customer &customer,
                                              std::chrono::system_clock::time_point time,
                                              std::chrono::minutes duration,
                                              const std::string &notes) {
-    std::string id = "R" + std::to_string(nextReservationNumber_++);
-    reservations_.emplace_back(id, customer, partySize, time, duration, notes);
-    Reservation &reservation = reservations_.back();
-    auto tableId = findAvailableTableId(partySize, time, duration);
-    if (tableId) {
-        reservation.assignTable(*tableId);
-    }
-    return reservation;
+    auto id = formatNumberedId('R', nextReservationNumber_++);
+    return createReservationRecord(std::move(id), customer, partySize, time, duration, notes);
 }
 
 Reservation &BookingSheet::recordWalkIn(const Customer &customer, int partySize, const std::string &notes) {
     auto now = std::chrono::system_clock::now();
-    auto &reservation = createReservation(customer, partySize, now,
-                                          std::chrono::minutes(kDefaultSeatingDurationMinutes), notes);
+    auto id = formatNumberedId('W', nextWalkInNumber_++);
+    auto &reservation = createReservationRecord(id, customer, partySize, now,
+                                                std::chrono::minutes(kDefaultSeatingDurationMinutes), notes);
     reservation.markSeated();
     return reservation;
+}
+
+bool BookingSheet::autoAssignTable(const std::string &id) {
+    auto reservation = findReservationById(id);
+    if (!reservation) {
+        return false;
+    }
+    auto tableId = findAvailableTableId(reservation->getPartySize(),
+                                        reservation->getDateTime(),
+                                        reservation->getDuration(),
+                                        reservation->getId());
+    if (!tableId) {
+        return false;
+    }
+    reservation->assignTable(*tableId);
+    return true;
+}
+
+bool BookingSheet::assignTable(const std::string &id, int tableId) {
+    auto reservation = findReservationById(id);
+    if (!reservation) {
+        return false;
+    }
+    const auto *table = getTableById(tableId);
+    if (!table || table->getCapacity() < reservation->getPartySize()) {
+        return false;
+    }
+    if (!isTableAvailable(tableId,
+                          reservation->getDateTime(),
+                          reservation->getDuration(),
+                          reservation->getId())) {
+        return false;
+    }
+    reservation->assignTable(tableId);
+    return true;
+}
+
+bool BookingSheet::clearTableAssignment(const std::string &id) {
+    auto reservation = findReservationById(id);
+    if (!reservation) {
+        return false;
+    }
+    reservation->clearTable();
+    return true;
 }
 
 Order &BookingSheet::recordOrder(const std::string &reservationId) {
@@ -409,6 +480,20 @@ bool BookingSheet::cancelReservation(const std::string &id) {
     }
     reservation->cancel();
     reservation->clearTable();
+    return true;
+}
+
+bool BookingSheet::deleteReservation(const std::string &id) {
+    auto reservationIt = std::find_if(reservations_.begin(), reservations_.end(),
+                                      [&](const Reservation &reservation) { return reservation.getId() == id; });
+    if (reservationIt == reservations_.end()) {
+        return false;
+    }
+    reservations_.erase(reservationIt);
+    orders_.erase(std::remove_if(orders_.begin(),
+                                 orders_.end(),
+                                 [&](const Order &order) { return order.getReservationId() == id; }),
+                  orders_.end());
     return true;
 }
 

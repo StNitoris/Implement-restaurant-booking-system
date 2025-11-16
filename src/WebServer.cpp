@@ -382,7 +382,10 @@ std::optional<ReservationStatus> parseReservationStatus(const std::string &value
 std::string tablesToJson(const Restaurant &restaurant) {
     std::ostringstream oss;
     oss << '[';
-    const auto &tables = restaurant.getBookingSheet().getTables();
+    const auto &sheet = restaurant.getBookingSheet();
+    const auto &tables = sheet.getTables();
+    const auto &reservations = sheet.getReservations();
+    const auto &orders = sheet.getOrders();
     for (size_t i = 0; i < tables.size(); ++i) {
         const auto &table = tables[i];
         if (i > 0) {
@@ -392,7 +395,41 @@ std::string tablesToJson(const Restaurant &restaurant) {
             << "\"id\":" << table.getId() << ','
             << "\"capacity\":" << table.getCapacity() << ','
             << "\"location\":\"" << escapeJson(table.getLocation()) << "\",";
-        oss << "\"status\":\"" << tableStatusToString(table.getStatus()) << "\"";
+        oss << "\"status\":\"" << tableStatusToString(table.getStatus()) << "\",";
+        oss << "\"reservations\":[";
+        bool firstReservation = true;
+        for (const auto &reservation : reservations) {
+            if (!reservation.getTableId() || *reservation.getTableId() != table.getId()) {
+                continue;
+            }
+            if (reservation.getStatus() == ReservationStatus::Cancelled) {
+                continue;
+            }
+            if (!firstReservation) {
+                oss << ',';
+            }
+            firstReservation = false;
+            oss << '{'
+                << "\"id\":\"" << escapeJson(reservation.getId()) << "\",";
+            oss << "\"customer\":\"" << escapeJson(reservation.getCustomer().getName()) << "\",";
+            oss << "\"partySize\":" << reservation.getPartySize() << ',';
+            oss << "\"status\":\"" << reservationStatusToString(reservation.getStatus()) << "\",";
+            oss << "\"orders\":[";
+            bool firstOrder = true;
+            for (const auto &order : orders) {
+                if (order.getReservationId() != reservation.getId()) {
+                    continue;
+                }
+                if (!firstOrder) {
+                    oss << ',';
+                }
+                firstOrder = false;
+                oss << "\"" << escapeJson(order.getId()) << "\"";
+            }
+            oss << ']';
+            oss << '}';
+        }
+        oss << ']';
         oss << '}';
     }
     oss << ']';
@@ -881,12 +918,52 @@ HttpResponse handleApiRequest(const HttpRequest &request,
                 break;
             case ReservationStatus::Cancelled:
                 reservation->cancel();
+                reservation->clearTable();
                 break;
             case ReservationStatus::Open:
                 reservation->updateStatus(ReservationStatus::Open);
                 break;
         }
         response.body = "{\"success\":true}";
+        return response;
+    }
+
+    const std::string tableSuffix = "/table";
+    if (request.method == "POST" && startsWith(request.path, statusPrefix) &&
+        request.path.size() > statusPrefix.size() + tableSuffix.size() && endsWith(request.path, tableSuffix)) {
+        auto id = request.path.substr(statusPrefix.size(), request.path.size() - statusPrefix.size() - tableSuffix.size());
+        auto reservation = sheet.findReservationById(id);
+        if (!reservation) {
+            return {404, "text/plain; charset=utf-8", "Reservation not found"};
+        }
+        auto data = parseFormEncoded(request.body);
+        auto mode = getFirstField(data, "mode").value_or("");
+        if (mode == "clear") {
+            if (!sheet.clearTableAssignment(id)) {
+                return {409, "text/plain; charset=utf-8", "Unable to clear table"};
+            }
+        } else if (mode == "auto") {
+            if (!sheet.autoAssignTable(id)) {
+                return {409, "text/plain; charset=utf-8", "No suitable table available"};
+            }
+        } else {
+            auto tableField = getFirstField(data, "tableId");
+            if (!tableField || tableField->empty()) {
+                return {400, "text/plain; charset=utf-8", "Missing tableId"};
+            }
+            auto parsed = toInt(*tableField);
+            if (!parsed || *parsed <= 0) {
+                return {400, "text/plain; charset=utf-8", "Invalid tableId"};
+            }
+            if (!sheet.assignTable(id, *parsed)) {
+                return {409, "text/plain; charset=utf-8", "Table not available"};
+            }
+        }
+        reservation = sheet.findReservationById(id);
+        if (!reservation) {
+            return {404, "text/plain; charset=utf-8", "Reservation not found"};
+        }
+        response.body = reservationToJson(*reservation);
         return response;
     }
 

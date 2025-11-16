@@ -27,6 +27,11 @@ footer {
   font-size: 0.95rem;
 }
 
+.muted {
+  color: #94a3b8;
+  font-size: 0.9rem;
+}
+
 main {
   max-width: 1100px;
   margin: 0 auto;
@@ -72,6 +77,24 @@ button:hover {
   background: #3c63b8;
 }
 
+button.secondary {
+  background: #6b7280;
+}
+
+button.secondary:hover {
+  background: #4b5563;
+}
+
+button.ghost {
+  background: transparent;
+  color: #2563eb;
+  border: 1px dashed #94a3b8;
+}
+
+button.ghost:hover {
+  background: rgba(37, 99, 235, 0.1);
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
@@ -86,6 +109,24 @@ button:hover {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+}
+
+.table-assignments {
+  margin-top: 0.35rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed rgba(82, 126, 219, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.table-assignment strong {
+  color: #111827;
+}
+
+.table-assignment small {
+  color: #475569;
 }
 
 .table-card.free {
@@ -135,6 +176,36 @@ td small {
   flex-wrap: wrap;
 }
 
+.table-cell-control {
+  min-width: 190px;
+}
+
+.current-table {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.table-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.table-actions button {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.table-select {
+  width: 100%;
+}
+
 .actions-column button.danger {
   background: #ef4444;
 }
@@ -174,7 +245,8 @@ td small {
 }
 
 input,
-textarea {
+textarea,
+select {
   padding: 0.5rem;
   border: 1px solid #cbd5f5;
   border-radius: 6px;

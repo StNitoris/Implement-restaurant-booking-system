@@ -4,6 +4,10 @@ function padNumber(value) {
   return value.toString().padStart(2, "0");
 }
 
+function formatIdentifier(prefix, number, width = 4) {
+  return `${prefix}${number.toString().padStart(width, "0")}`;
+}
+
 function formatDateTimeValue(date) {
   return `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())} ${padNumber(
     date.getHours()
@@ -177,6 +181,7 @@ function createMockApi() {
       ],
       bookingDate: formatDateValue(now),
       nextReservationNumber: 1003,
+      nextWalkInNumber: 5001,
       nextOrderNumber: 5002,
     };
   }
@@ -203,6 +208,10 @@ function createMockApi() {
       if (typeof parsed.nextReservationNumber !== "number" || typeof parsed.nextOrderNumber !== "number") {
         parsed.nextReservationNumber = 1000 + parsed.reservations.length + 1;
         parsed.nextOrderNumber = 5000 + parsed.orders.length + 1;
+      }
+      if (typeof parsed.nextWalkInNumber !== "number") {
+        const walkInCount = parsed.reservations.filter((item) => typeof item.id === "string" && item.id.startsWith("W")).length;
+        parsed.nextWalkInNumber = 5000 + walkInCount + 1;
       }
       if (typeof parsed.bookingDate !== "string") {
         parsed.bookingDate = formatDateValue(new Date());
@@ -333,6 +342,82 @@ function createMockApi() {
     return map;
   }
 
+  function getReservationById(id) {
+    return state.reservations.find((item) => item.id === id) || null;
+  }
+
+  function removeOrdersByReservation(id) {
+    state.orders = state.orders.filter((order) => order.reservationId !== id);
+  }
+
+  function serializeTables() {
+    return state.tables.map((table) => {
+      const reservations = state.reservations
+        .filter((reservation) => reservation.tableId === table.id && reservation.status !== "Cancelled")
+        .map((reservation) => ({
+          id: reservation.id,
+          customer: reservation.customer,
+          partySize: reservation.partySize,
+          status: reservation.status,
+          orders: state.orders
+            .filter((order) => order.reservationId === reservation.id)
+            .map((order) => order.id),
+        }));
+      return { ...table, reservations };
+    });
+  }
+
+  function assignTableManually(reservation, tableId) {
+    const table = findTableById(tableId);
+    if (!table) {
+      return { ok: false, status: 404, message: "桌位不存在" };
+    }
+    const start = parseDateTimeInput(reservation.time);
+    if (!start) {
+      return { ok: false, status: 400, message: "预订时间无效" };
+    }
+    if (table.capacity < reservation.partySize) {
+      return { ok: false, status: 409, message: "桌位容量不足" };
+    }
+    if (!isTableAvailable(tableId, start, reservation.durationMinutes || defaultDuration, reservation.id)) {
+      return { ok: false, status: 409, message: "桌位已被占用" };
+    }
+    reservation.tableId = tableId;
+    reservation.lastModified = formatDateTimeValue(new Date());
+    recomputeTables();
+    persist();
+    return { ok: true };
+  }
+
+  function autoAssignTableForReservation(reservation) {
+    const start = parseDateTimeInput(reservation.time);
+    if (!start) {
+      return { ok: false, status: 400, message: "预订时间无效" };
+    }
+    const tableId = findAvailableTable(
+      reservation.partySize,
+      start,
+      reservation.durationMinutes || defaultDuration,
+      reservation.id
+    );
+    if (!tableId) {
+      return { ok: false, status: 409, message: "暂无可用桌位" };
+    }
+    reservation.tableId = tableId;
+    reservation.lastModified = formatDateTimeValue(new Date());
+    recomputeTables();
+    persist();
+    return { ok: true };
+  }
+
+  function clearTableAssignment(reservation) {
+    reservation.tableId = null;
+    reservation.lastModified = formatDateTimeValue(new Date());
+    recomputeTables();
+    persist();
+    return { ok: true };
+  }
+
   function createReservationFromForm(form, { isWalkIn = false } = {}) {
     const name = getFormField(form, "name");
     const phone = getFormField(form, "phone");
@@ -357,10 +442,13 @@ function createMockApi() {
       timePoint = parsed;
     }
 
-    const tableId = findAvailableTable(partySize, timePoint, durationMinutes, null);
+    const reservationId = isWalkIn
+      ? formatIdentifier("W", state.nextWalkInNumber++)
+      : formatIdentifier("R", state.nextReservationNumber++);
+    const tableId = findAvailableTable(partySize, timePoint, durationMinutes, reservationId);
 
     const reservation = {
-      id: `R${state.nextReservationNumber++}`,
+      id: reservationId,
       customer: name,
       phone,
       email: getFormField(form, "email") || "",
@@ -452,14 +540,13 @@ function createMockApi() {
     return makeJsonResponse({ success: true });
   }
 
-  function cancelReservation(id) {
-    const reservation = state.reservations.find((item) => item.id === id);
-    if (!reservation) {
+  function deleteReservationEntry(id) {
+    const index = state.reservations.findIndex((item) => item.id === id);
+    if (index === -1) {
       return makeTextResponse("未找到预订", 404);
     }
-    reservation.status = "Cancelled";
-    reservation.tableId = null;
-    reservation.lastModified = formatDateTimeValue(new Date());
+    state.reservations.splice(index, 1);
+    removeOrdersByReservation(id);
     recomputeTables();
     persist();
     return makeJsonResponse({ success: true });
@@ -476,7 +563,7 @@ function createMockApi() {
     if (method === "GET" && path === "/api/tables") {
       recomputeTables();
       persist();
-      return makeJsonResponse(state.tables);
+      return makeJsonResponse(serializeTables());
     }
     if (method === "GET" && path === "/api/reservations") {
       recomputeTables();
@@ -524,7 +611,7 @@ function createMockApi() {
 
     if (method === "DELETE" && path.startsWith("/api/reservations/")) {
       const id = path.replace("/api/reservations/", "");
-      return cancelReservation(id);
+      return deleteReservationEntry(id);
     }
 
     if (method === "POST" && path.endsWith("/status") && path.startsWith("/api/reservations/")) {
@@ -535,6 +622,36 @@ function createMockApi() {
         return makeTextResponse("缺少状态", 400);
       }
       return updateReservationStatus(id, status);
+    }
+
+    if (method === "POST" && path.endsWith("/table") && path.startsWith("/api/reservations/")) {
+      const id = path.slice("/api/reservations/".length, -"/table".length);
+      const reservation = getReservationById(id);
+      if (!reservation) {
+        return makeTextResponse("未找到预订", 404);
+      }
+      const form = parseFormBody(options.body);
+      const mode = (getFormField(form, "mode") || "").toLowerCase();
+      let result;
+      if (mode === "clear") {
+        result = clearTableAssignment(reservation);
+      } else if (mode === "auto") {
+        result = autoAssignTableForReservation(reservation);
+      } else {
+        const tableValue = getFormField(form, "tableId");
+        if (!tableValue) {
+          return makeTextResponse("缺少桌位", 400);
+        }
+        const parsed = Number.parseInt(tableValue, 10);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          return makeTextResponse("桌位无效", 400);
+        }
+        result = assignTableManually(reservation, parsed);
+      }
+      if (!result.ok) {
+        return makeTextResponse(result.message, result.status || 400);
+      }
+      return makeJsonResponse(reservation);
     }
 
     return makeTextResponse("未知接口", 404);
@@ -564,6 +681,7 @@ const orderFeedback = document.getElementById("orderFeedback");
 const ordersTableBody = document.querySelector("#ordersTable tbody");
 const staffList = document.getElementById("staffList");
 
+let tablesCache = [];
 let reservationsCache = [];
 let menuCache = [];
 
@@ -621,14 +739,36 @@ function statusBadge(status) {
 
 function renderTables(tables) {
   tablesContainer.innerHTML = "";
+  if (!tables || tables.length === 0) {
+    tablesContainer.innerHTML = '<p class="muted">暂无桌位数据</p>';
+    return;
+  }
   tables.forEach((table) => {
     const card = document.createElement("div");
-    card.className = `table-card ${table.status.toLowerCase()}`;
+    const statusLabel = table.status || "Free";
+    card.className = `table-card ${statusLabel.toLowerCase()}`;
+    const assignments = Array.isArray(table.reservations) ? table.reservations : [];
+    const assignmentsHtml = assignments.length
+      ? assignments
+          .map((assignment) => {
+            const orders = assignment.orders && assignment.orders.length ? assignment.orders.join("、") : "暂无订单";
+            return `
+              <div class="table-assignment">
+                <div><strong>${assignment.id}</strong>｜${assignment.customer}｜${assignment.partySize}人</div>
+                <small>状态：${assignment.status}｜订单：${orders}</small>
+              </div>
+            `;
+          })
+          .join("")
+      : '<small class="muted">当前无预订/订单</small>';
     card.innerHTML = `
       <strong>桌号 ${table.id}</strong>
       <span>容量：${table.capacity}</span>
       <span>区域：${table.location || "-"}</span>
-      <span>状态：${table.status}</span>
+      <span>状态：${statusLabel}</span>
+      <div class="table-assignments">
+        ${assignmentsHtml}
+      </div>
     `;
     tablesContainer.appendChild(card);
   });
@@ -636,6 +776,14 @@ function renderTables(tables) {
 
 function renderReservations(reservations) {
   reservationTableBody.innerHTML = "";
+  if (!reservations || reservations.length === 0) {
+    const row = document.createElement("tr");
+    row.innerHTML = '<td colspan="7">暂无预订</td>';
+    reservationTableBody.appendChild(row);
+    return;
+  }
+
+  const sortedTables = [...tablesCache].sort((a, b) => a.capacity - b.capacity || a.id - b.id);
   reservations.forEach((r) => {
     const row = document.createElement("tr");
     const detailLines = [];
@@ -656,10 +804,71 @@ function renderReservations(reservations) {
       </td>
       <td>${r.partySize}</td>
       <td><span title="预计结束：${r.endTime}\n最近更新：${r.lastModified}">${r.time}</span></td>
-      <td>${r.tableId ?? "-"}</td>
+      <td class="table-cell-control">
+        <div class="current-table">${r.tableId ? `桌号 ${r.tableId}` : "未分配"}</div>
+        <div class="table-controls"></div>
+      </td>
       <td>${statusBadge(r.status)}</td>
       <td class="actions-column"></td>
     `;
+
+    const controlsEl = row.querySelector(".table-controls");
+    if (controlsEl) {
+      const select = document.createElement("select");
+      select.className = "table-select";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = sortedTables.length ? "选择桌位" : "暂无可选桌位";
+      select.appendChild(placeholder);
+      sortedTables.forEach((table) => {
+        const option = document.createElement("option");
+        option.value = table.id;
+        option.textContent = `桌${table.id}｜${table.capacity}人｜${table.status}`;
+        if (table.status === "OutOfService") {
+          option.disabled = true;
+        }
+        select.appendChild(option);
+      });
+      controlsEl.appendChild(select);
+
+      const actions = document.createElement("div");
+      actions.className = "table-actions";
+
+      const manualBtn = document.createElement("button");
+      manualBtn.type = "button";
+      manualBtn.textContent = "手动分配";
+      manualBtn.disabled = sortedTables.length === 0;
+      manualBtn.addEventListener("click", async () => {
+        if (!select.value) {
+          alert("请先选择要分配的桌位。");
+          return;
+        }
+        await assignReservationTable(r.id, select.value);
+      });
+      actions.appendChild(manualBtn);
+
+      const autoBtn = document.createElement("button");
+      autoBtn.type = "button";
+      autoBtn.textContent = "自动";
+      autoBtn.classList.add("secondary");
+      autoBtn.addEventListener("click", async () => {
+        await autoAssignReservationTable(r.id);
+      });
+      actions.appendChild(autoBtn);
+
+      const clearBtn = document.createElement("button");
+      clearBtn.type = "button";
+      clearBtn.textContent = "释放";
+      clearBtn.classList.add("ghost");
+      clearBtn.disabled = !r.tableId;
+      clearBtn.addEventListener("click", async () => {
+        await clearReservationTable(r.id);
+      });
+      actions.appendChild(clearBtn);
+
+      controlsEl.appendChild(actions);
+    }
+
     const actionsCell = row.querySelector(".actions-column");
     [
       { label: "入座", status: "Seated" },
@@ -805,14 +1014,16 @@ async function updateReservationStatus(id, status) {
     if (!response.ok) {
       throw new Error("状态更新失败");
     }
+    await loadTables();
     await loadReservations();
+    await loadReport();
   } catch (error) {
     alert(normalizeError(error));
   }
 }
 
 async function deleteReservation(id) {
-  if (!window.confirm("确认删除该预订并标记为取消？")) {
+  if (!window.confirm("删除后将连同该预订的所有订单一起移除，确认继续？")) {
     return;
   }
   try {
@@ -832,10 +1043,64 @@ async function deleteReservation(id) {
   }
 }
 
+async function postTableOperation(id, params) {
+  const response = await apiFetch(`/api/reservations/${id}/table`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: params.toString(),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "桌位操作失败");
+  }
+}
+
+async function assignReservationTable(id, tableId) {
+  try {
+    const params = new URLSearchParams();
+    params.set("tableId", tableId);
+    await postTableOperation(id, params);
+    await loadTables();
+    await loadReservations();
+  } catch (error) {
+    alert(normalizeError(error));
+  }
+}
+
+async function autoAssignReservationTable(id) {
+  try {
+    const params = new URLSearchParams();
+    params.set("mode", "auto");
+    await postTableOperation(id, params);
+    await loadTables();
+    await loadReservations();
+  } catch (error) {
+    alert(normalizeError(error));
+  }
+}
+
+async function clearReservationTable(id) {
+  try {
+    const params = new URLSearchParams();
+    params.set("mode", "clear");
+    await postTableOperation(id, params);
+    await loadTables();
+    await loadReservations();
+  } catch (error) {
+    alert(normalizeError(error));
+  }
+}
+
 async function loadTables() {
   try {
     const data = await fetchJson("/api/tables");
+    tablesCache = data;
     renderTables(data);
+    if (reservationsCache.length > 0) {
+      renderReservations(reservationsCache);
+    }
   } catch (error) {
     tablesContainer.innerHTML = `<p class="error">${normalizeError(error)}</p>`;
   }
