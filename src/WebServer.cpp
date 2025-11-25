@@ -70,6 +70,12 @@ public:
 };
 #endif
 
+#ifdef _WIN32
+using SendSize = int;
+#else
+using SendSize = ssize_t;
+#endif
+
 struct HttpRequest {
     std::string method;
     std::string path;
@@ -974,9 +980,9 @@ int portableSend(SocketHandle socket, const char *data, size_t length) {
     size_t totalSent = 0;
     while (totalSent < length) {
 #ifdef _WIN32
-        int chunk = send(socket, data + totalSent, static_cast<int>(length - totalSent), 0);
+        SendSize chunk = send(socket, data + totalSent, static_cast<int>(length - totalSent), 0);
 #else
-        ssize_t chunk = send(socket, data + totalSent, length - totalSent, 0);
+        SendSize chunk = send(socket, data + totalSent, length - totalSent, 0);
 #endif
         if (chunk <= 0) {
             return -1;
