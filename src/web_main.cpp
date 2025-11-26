@@ -2,6 +2,7 @@
 #include "SeedData.hpp"
 #include "WebServer.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -35,27 +36,53 @@ int main(int argc, char **argv) {
         return std::filesystem::exists(p / "index.html");
     };
 
+    auto addAncestorWebDirs = [](std::vector<std::filesystem::path> &list,
+                                 const std::filesystem::path &base) {
+        if (base.empty()) {
+            return;
+        }
+        std::filesystem::path cursor = std::filesystem::absolute(base);
+        while (!cursor.empty()) {
+            list.push_back(cursor / "web");
+            if (cursor == cursor.root_path()) {
+                break;
+            }
+            cursor = cursor.parent_path();
+        }
+    };
+
     auto findStaticDir = [&](const std::filesystem::path &initial) -> std::optional<std::filesystem::path> {
         std::vector<std::filesystem::path> candidates;
         if (!initial.empty()) {
             candidates.push_back(initial);
         }
-        std::filesystem::path exePath = std::filesystem::absolute(argv[0]).parent_path();
-        candidates.push_back(exePath / "web");
-        candidates.push_back(exePath.parent_path() / "web");
-        candidates.push_back(std::filesystem::current_path() / "web");
 
+        addAncestorWebDirs(candidates, std::filesystem::path(argv[0]).parent_path());
+        addAncestorWebDirs(candidates, std::filesystem::current_path());
+
+        // Remove duplicate paths while preserving order
+        std::vector<std::filesystem::path> deduped;
         for (const auto &candidate : candidates) {
-            if (existsDir(candidate) && containsIndex(candidate)) {
-                return std::filesystem::absolute(candidate);
+            auto absCandidate = std::filesystem::absolute(candidate);
+            if (std::find(deduped.begin(), deduped.end(), absCandidate) == deduped.end()) {
+                deduped.push_back(absCandidate);
             }
+        }
+
+        for (const auto &candidate : deduped) {
+            if (existsDir(candidate) && containsIndex(candidate)) {
+                return candidate;
+            }
+        }
+        std::cerr << "Static directory not found. Tried: " << std::endl;
+        for (const auto &candidate : deduped) {
+            std::cerr << "  - " << candidate << std::endl;
         }
         return std::nullopt;
     };
 
     auto resolved = findStaticDir(userProvidedStaticDir ? staticDir : std::filesystem::path{});
     if (!resolved) {
-        std::cerr << "Static directory not found (tried defaults near executable and current path)" << std::endl;
         return 1;
     }
     staticDir = *resolved;
