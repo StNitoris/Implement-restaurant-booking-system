@@ -86,7 +86,7 @@ if (runtimeConfiguredApiBase && STORAGE_AVAILABLE) {
 
 const ACTIVE_API_BASE = runtimeConfiguredApiBase || storedConfiguredApiBase || null;
 const USING_FILE_ORIGIN = window.location.protocol === "file:" || window.location.origin === "null";
-const USE_MOCK_API = USING_FILE_ORIGIN && !ACTIVE_API_BASE;
+const USE_MOCK_API = false;
 const API_BASE = ACTIVE_API_BASE || (USING_FILE_ORIGIN ? FALLBACK_API_BASE : "");
 
 function createMockApi() {
@@ -686,9 +686,6 @@ let reservationsCache = [];
 let menuCache = [];
 
 async function apiFetch(url, options = {}) {
-  if (USE_MOCK_API && mockApi) {
-    return mockApi.handle(url, options);
-  }
   return fetch(resolveApi(url), options);
 }
 
@@ -701,9 +698,6 @@ function resolveApi(path) {
 
 function normalizeError(error) {
   if (error instanceof TypeError || error.name === "TypeError") {
-    if (USE_MOCK_API) {
-      return "本地演示模式下发生网络错误，请稍后重试。";
-    }
     const currentOrigin =
       window.location.origin && window.location.origin !== "null"
         ? window.location.origin

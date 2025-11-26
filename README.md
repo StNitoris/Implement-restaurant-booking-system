@@ -64,15 +64,13 @@ Web 版本会在本地启动一个极简的 HTTP 服务，默认挂载 `web/` �
 - **菜单与经营数据**：实时拉取示例菜单与当日报表，方便课堂演示。
 - **员工信息**：展示种子数据中配置的前台与经理账号，呼应权限模型。
 
-### 浏览器直接演示（无需后端）
+### 浏览器使用说明（需连接后端）
 
-- 直接在浏览器中打开 `web/index.html`（双击或拖拽到地址栏），页面会自动进入“本地演示模式”，启用内置的模拟 API，无需启动 C++ 后端即可体验完整流程。
-- 首次打开会载入示例桌位、预订、订单与菜单，后续操作产生的数据会保存在浏览器 `localStorage` 中，关闭页面后仍可继续演示。
-- 如需恢复到出厂示例，可在浏览器控制台执行 `localStorage.removeItem('restaurant-booking-demo-state')` 后刷新页面；若要重新启用本地演示，还需清除 `localStorage.removeItem('restaurant-booking-api-base')`。
-- 若要切换至真实后端服务，可在控制台执行 `localStorage.setItem('restaurant-booking-api-base', 'http://你的地址')` 或设置 `window.__BOOKING_API_BASE__ = "http://你的地址"` 后刷新；设置完成后会禁用本地模拟 API，所有请求将发送至指定服务端。
-- 仍需从 `file://` 访问远程服务时，内置 HTTP 服务已开启 CORS 支持，可直接指向 `http://localhost:8080`、`http://127.0.0.1:8080` 或 `http://[::1]:8080` 等地址。
+- 推荐通过 `./build/restaurant_booking_server` 直接托管前端与 API：运行后访问 `http://localhost:8080`（或指定端口）即可完成预订、点餐等操作，所有数据都由后台进程维护。
+- 如需从其他来源访问（例如前端部署在不同主机或通过 `file://` 打开），可在浏览器控制台设置 `window.__BOOKING_API_BASE__ = "http://你的地址"` 后刷新，或写入 `localStorage.setItem('restaurant-booking-api-base', 'http://你的地址')`。此时页面会将所有请求发送到指定的后端服务。
+- 若前端无法连接后端，请确认后端进程已启动且浏览器地址与 `API_BASE` 配置一致；内置的 CORS 头已允许从 `file://` 或不同主机发起请求。
 
-前端仅作为课程作业的演示界面：当连接 C++ 服务端时，数据存放在进程内存中，重启服务会恢复初始状态；本地演示模式则将数据保存在浏览器 `localStorage`，可随时手动清除。
+前端仅作为课程作业的演示界面：连接 C++ 服务端时，数据存放在进程内存中，重启服务会恢复初始状态。
 
 - **HTTP API 拓展**：
   - `GET /api/reservations/{id}`：返回单条预订的完整详情（顾客信息、时间、桌位、状态、最后更新时间等）。
