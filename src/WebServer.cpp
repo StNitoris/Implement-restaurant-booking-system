@@ -1104,7 +1104,7 @@ void runWebServer(Restaurant &restaurant, const std::string &staticDir, int port
 
     std::mutex mutex;
     while (true) {
-        sockaddr_in clientAddress{};
+        sockaddr_storage clientAddress{};
         socklen_t clientLen = sizeof(clientAddress);
         SocketHandle clientFd = accept(serverFd, reinterpret_cast<sockaddr *>(&clientAddress), &clientLen);
         if (clientFd == INVALID_SOCKET_HANDLE) {
