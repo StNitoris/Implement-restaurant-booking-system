@@ -1,4 +1,4 @@
-#include "ReservationSystem.hpp"
+﻿#include "ReservationSystem.hpp"
 #include "SeedData.hpp"
 
 #include <iostream>
@@ -181,7 +181,6 @@ void recordOrderFlow(Restaurant &restaurant) {
     }
     auto &order = restaurant.getBookingSheet().recordOrder(reservationId);
     std::cout << "开始录入点餐，订单编号 " << order.getId() << "。输入空行结束。\n";
-    const auto &menu = restaurant.getMenu();
     while (true) {
         std::string itemName = readLine("菜品名称: ");
         if (itemName.empty()) {

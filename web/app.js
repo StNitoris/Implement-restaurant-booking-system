@@ -63,9 +63,22 @@ function normalizeApiPath(url) {
 }
 
 const STORAGE_AVAILABLE = supportsLocalStorage();
+const USING_FILE_ORIGIN = window.location.protocol === "file:" || window.location.origin === "null";
+const USE_MOCK_API = false;
+
 const runtimeConfiguredApiBase =
   typeof window !== "undefined" && window.__BOOKING_API_BASE__ ? window.__BOOKING_API_BASE__ : null;
-const storedConfiguredApiBase = (() => {
+const queryConfiguredApiBase = (() => {
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    const value = params.get("api") || params.get("apiBase");
+    return value && value.trim().length > 0 ? value.trim() : null;
+  } catch (error) {
+    return null;
+  }
+})();
+
+function readStoredApiBase() {
   if (!STORAGE_AVAILABLE) {
     return null;
   }
@@ -74,20 +87,36 @@ const storedConfiguredApiBase = (() => {
   } catch (error) {
     return null;
   }
-})();
+}
 
-if (runtimeConfiguredApiBase && STORAGE_AVAILABLE) {
+function persistApiBase(base) {
+  if (!STORAGE_AVAILABLE || !base) {
+    return;
+  }
   try {
-    window.localStorage.setItem("restaurant-booking-api-base", runtimeConfiguredApiBase);
+    window.localStorage.setItem("restaurant-booking-api-base", base);
   } catch (error) {
     // 忽略存储异常
   }
 }
 
-const ACTIVE_API_BASE = runtimeConfiguredApiBase || storedConfiguredApiBase || null;
-const USING_FILE_ORIGIN = window.location.protocol === "file:" || window.location.origin === "null";
-const USE_MOCK_API = USING_FILE_ORIGIN && !ACTIVE_API_BASE;
-const API_BASE = ACTIVE_API_BASE || (USING_FILE_ORIGIN ? FALLBACK_API_BASE : "");
+const apiBase = (() => {
+  if (runtimeConfiguredApiBase) return runtimeConfiguredApiBase;
+  if (queryConfiguredApiBase) {
+    persistApiBase(queryConfiguredApiBase);
+    return queryConfiguredApiBase;
+  }
+  const stored = readStoredApiBase();
+  if (stored) return stored;
+  if (!USING_FILE_ORIGIN && window.location.origin) {
+    return ""; // 与后端同源，直接使用相对路径
+  }
+  return FALLBACK_API_BASE;
+})();
+
+async function ensureApiBase() {
+  return apiBase;
+}
 
 function createMockApi() {
   const storageKey = "restaurant-booking-demo-state";
@@ -686,29 +715,24 @@ let reservationsCache = [];
 let menuCache = [];
 
 async function apiFetch(url, options = {}) {
-  if (USE_MOCK_API && mockApi) {
-    return mockApi.handle(url, options);
-  }
-  return fetch(resolveApi(url), options);
+  const base = await ensureApiBase();
+  return fetch(resolveApi(url, base), options);
 }
 
-function resolveApi(path) {
+function resolveApi(path, base = apiBase ?? "") {
   if (/^https?:\/\//.test(path)) {
     return path;
   }
-  return `${API_BASE}${path}`;
+  return `${base}${path}`;
 }
 
 function normalizeError(error) {
   if (error instanceof TypeError || error.name === "TypeError") {
-    if (USE_MOCK_API) {
-      return "本地演示模式下发生网络错误，请稍后重试。";
-    }
     const currentOrigin =
       window.location.origin && window.location.origin !== "null"
         ? window.location.origin
         : FALLBACK_API_BASE;
-    const target = API_BASE || currentOrigin;
+    const target = apiBase ?? currentOrigin;
     return `无法连接服务器，请确认已启动后端服务（${target}）。`;
   }
   return error.message || "发生未知错误";

@@ -1,6 +1,12 @@
 #include "WebServer.hpp"
 
 #ifdef _WIN32
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #ifdef _MSC_VER
@@ -68,6 +74,12 @@ public:
     SocketEnvironment(const SocketEnvironment &) = delete;
     SocketEnvironment &operator=(const SocketEnvironment &) = delete;
 };
+#endif
+
+#ifdef _WIN32
+using SendSize = int;
+#else
+using SendSize = ssize_t;
 #endif
 
 struct HttpRequest {
@@ -823,7 +835,7 @@ HttpResponse handleApiRequest(const HttpRequest &request,
     if ((request.method == "PUT" || request.method == "DELETE") && isReservationIdPath(request.path)) {
         auto id = request.path.substr(reservationIdPrefix.size());
         if (request.method == "DELETE") {
-            if (!sheet.cancelReservation(id)) {
+            if (!sheet.deleteReservation(id)) {
                 return {404, "text/plain; charset=utf-8", "Reservation not found"};
             }
             response.body = "{\"success\":true}";
@@ -974,9 +986,9 @@ int portableSend(SocketHandle socket, const char *data, size_t length) {
     size_t totalSent = 0;
     while (totalSent < length) {
 #ifdef _WIN32
-        int chunk = send(socket, data + totalSent, static_cast<int>(length - totalSent), 0);
+        SendSize chunk = send(socket, data + totalSent, static_cast<int>(length - totalSent), 0);
 #else
-        ssize_t chunk = send(socket, data + totalSent, length - totalSent, 0);
+        SendSize chunk = send(socket, data + totalSent, length - totalSent, 0);
 #endif
         if (chunk <= 0) {
             return -1;
@@ -1092,7 +1104,7 @@ void runWebServer(Restaurant &restaurant, const std::string &staticDir, int port
 
     std::mutex mutex;
     while (true) {
-        sockaddr_in clientAddress{};
+        sockaddr_storage clientAddress{};
         socklen_t clientLen = sizeof(clientAddress);
         SocketHandle clientFd = accept(serverFd, reinterpret_cast<sockaddr *>(&clientAddress), &clientLen);
         if (clientFd == INVALID_SOCKET_HANDLE) {
